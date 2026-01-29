@@ -90,18 +90,24 @@ app.post("/github/webhook", async (req, res) => {
 
   // 这里建议做 deliveryId 去重（Redis/DB），防止重放；略
 
-  // 只处理：issues.closed
+  // issues.closed
   if (event === "issues" && payload?.action === "closed") {
     const issue = payload.issue;
-    const text = `✅ [${repo}] Issue #${issue.number} closed\n${issue.title}\n${issue.html_url}\nby ${payload.sender?.login || "unknown"}\n(delivery ${deliveryId})`;
+    const text = `✅ [${repo}] Issue #${issue.number} closed\n${issue.title}\n${issue.html_url}\nby ${payload.sender?.login || "unknown"}`;
 
-    // 快速响应，避免阻塞；真实生产建议写入队列后再发
     res.status(202).send("Accepted");
+    sendFeishuText(text).catch((err) => console.error("Feishu send failed:", err));
+    return;
+  }
 
-    sendFeishuText(text).catch((err) => {
-      console.error("Feishu send failed:", err);
-      // 这里做重试/落库，避免丢消息（GitHub 不会自动重试投递） [oai_citation:6‡GitHub Docs](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks)
-    });
+  // issue_comment.created
+  if (event === "issue_comment" && payload?.action === "created") {
+    const issue = payload.issue;
+    const comment = payload.comment;
+    const text = `💬 [${repo}] Issue #${issue.number} 新评论\n${issue.title}\nby ${comment.user?.login || "unknown"}\n\n${comment.body?.slice(0, 200) || ""}${comment.body?.length > 200 ? "..." : ""}\n${comment.html_url}`;
+
+    res.status(202).send("Accepted");
+    sendFeishuText(text).catch((err) => console.error("Feishu send failed:", err));
     return;
   } else {
     console.log('Ignored Event', event, payload)
