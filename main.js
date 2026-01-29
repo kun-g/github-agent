@@ -103,6 +103,8 @@ app.post("/github/webhook", async (req, res) => {
       // 这里做重试/落库，避免丢消息（GitHub 不会自动重试投递） [oai_citation:6‡GitHub Docs](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks)
     });
     return;
+  } else {
+    console.log('Ignored Event', event, payload)
   }
 
   res.status(200).send("Ignored event");
