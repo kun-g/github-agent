@@ -18,6 +18,14 @@ const ALLOWED_REPOS = new Set(
     .filter(Boolean)
 );
 
+// GitHub 用户名 -> 飞书 user_id 映射
+let USER_MAPPING = {};
+try {
+  USER_MAPPING = JSON.parse(process.env.USER_MAPPING || "{}");
+} catch {
+  console.warn("Invalid USER_MAPPING JSON, using empty mapping");
+}
+
 function verifyGitHubSignature(req) {
   const sig = req.header("X-Hub-Signature-256") || "";
   const expected =
@@ -41,6 +49,38 @@ async function sendFeishuText(text) {
   const payload = {
     msg_type: "text",
     content: { text },
+  };
+
+  if (FEISHU_SIGN_SECRET) {
+    const ts = Math.floor(Date.now() / 1000).toString();
+    payload.timestamp = ts;
+    payload.sign = feishuSign(ts, FEISHU_SIGN_SECRET);
+  }
+
+  const resp = await fetch(FEISHU_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`Feishu webhook failed: ${resp.status} ${body}`);
+  }
+}
+
+// 发送富文本消息（支持 @ 人）
+async function sendFeishuPost(title, contentLines) {
+  const payload = {
+    msg_type: "post",
+    content: {
+      post: {
+        zh_cn: {
+          title,
+          content: [contentLines],
+        },
+      },
+    },
   };
 
   if (FEISHU_SIGN_SECRET) {
@@ -93,10 +133,24 @@ app.post("/github/webhook", async (req, res) => {
   // issues.closed
   if (event === "issues" && payload?.action === "closed") {
     const issue = payload.issue;
-    const text = `✅ [${repo}] Issue #${issue.number} closed\n${issue.title}\n${issue.html_url}\nby ${payload.sender?.login || "unknown"}`;
+    const opener = issue.user?.login || "";
+    const feishuUserId = USER_MAPPING[opener];
+
+    const contentLines = [
+      { tag: "text", text: `Issue #${issue.number} 已关闭\n` },
+      { tag: "text", text: `${issue.title}\n` },
+      { tag: "a", text: "查看详情", href: issue.html_url },
+      { tag: "text", text: `\nby ${payload.sender?.login || "unknown"}` },
+    ];
+
+    // 如果有映射，@ 提 issue 的人
+    if (feishuUserId) {
+      contentLines.push({ tag: "text", text: "\n" });
+      contentLines.push({ tag: "at", user_id: feishuUserId.id, user_name: feishuUserId.name });
+    }
 
     res.status(202).send("Accepted");
-    sendFeishuText(text).catch((err) => console.error("Feishu send failed:", err));
+    sendFeishuPost(`✅ [${repo}]`, contentLines).catch((err) => console.error("Feishu send failed:", err));
     return;
   }
 
