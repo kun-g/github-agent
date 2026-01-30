@@ -135,6 +135,7 @@ app.post("/github/webhook", async (req, res) => {
     const issue = payload.issue;
     const opener = issue.user?.login || "";
     const feishuUserId = USER_MAPPING[opener];
+    console.log(`Issue closed by ${opener}, feishuUserId:`, feishuUserId);
 
     const contentLines = [
       { tag: "text", text: `Issue #${issue.number} 已关闭\n` },
